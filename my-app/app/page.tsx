@@ -18,6 +18,7 @@ export default function Home() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [supabaseFiles, setSupabaseFiles] = useState<SupabaseFile[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+  const [isPdfReady, setIsPdfReady] = useState(false);
   const [selectedPdf, setSelectedPdf] = useState<File | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -36,11 +37,26 @@ export default function Home() {
     (async () => {
       try {
         const pdfjsLib = await import('pdfjs-dist');
-        pdfjs = pdfjsLib.default;
-        // Configure worker for text extraction
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+        // pdfjs-dist exports the pdf object directly, not as default
+        pdfjs = pdfjsLib.default || pdfjsLib;
+        
+        // Handle both module formats
+        if (!pdfjs || !pdfjs.getDocument) {
+          // Try to access the pdf property if it exists
+          pdfjs = pdfjsLib.pdf || pdfjsLib;
+        }
+        
+        if (!pdfjs || !pdfjs.GlobalWorkerOptions) {
+          throw new Error('PDF.js module structure not recognized');
+        }
+        
+        // Configure worker for text extraction - use local worker from public directory
+        // This avoids CDN issues and provides more reliable PDF processing
+        pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+        setIsPdfReady(true);
       } catch (error) {
         console.error('Failed to initialize PDF.js for extraction:', error);
+        setIsPdfReady(false);
       }
     })();
   }, []);
@@ -89,9 +105,15 @@ export default function Home() {
 
     try {
       if (selectedPdf.type === 'application/pdf') {
-        // Client-side PDF text extraction using pdfjs-dist
+        // Wait for PDF.js to be ready (max 5 seconds)
+        let retries = 50; // 50 * 100ms = 5 seconds
+        while (!pdfjs && retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          retries--;
+        }
+
         if (!pdfjs) {
-          throw new Error('PDF library not loaded yet, please wait');
+          throw new Error('PDF library failed to load. Please refresh the page and try again.');
         }
 
         const buffer = await selectedPdf.arrayBuffer();
@@ -455,7 +477,7 @@ export default function Home() {
         </div>
 
         {/* Right Panel - Document Viewer with Tabs */}
-        <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', backgroundColor: 'white', display: 'flex', flexDirection: 'column', color: 'black' }}>
+        <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', backgroundColor: 'white', display: 'flex', flexDirection: 'column', color: 'black', height: 'calc(100vh - 200px)', minHeight: 0 }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: '#1d324b' }}>Document Viewer</h2>
           
           {selectedPdf ? (
@@ -477,19 +499,25 @@ export default function Home() {
                   📄 PDF
                 </button>
                 <button
-                  onClick={() => setActiveTab('text')}
-                  disabled={!extractedText}
+                  onClick={async () => {
+                    if (!selectedPdf) {
+                      setExtractError("Please select a file first");
+                      return;
+                    }
+                    await extractText();
+                  }}
+                  disabled={isExtracting || !selectedPdf}
                   style={{
                     padding: '0.5rem 1rem',
                     border: 'none',
-                    backgroundColor: activeTab === 'text' ? '#0070f3' : (extractedText ? '#e0e0e0' : '#f0f0f0'),
-                    color: activeTab === 'text' ? 'white' : (extractedText ? 'black' : '#999'),
+                    backgroundColor: activeTab === 'text' ? '#0070f3' : '#e0e0e0',
+                    color: activeTab === 'text' ? 'white' : 'black',
                     borderRadius: '4px',
-                    cursor: extractedText ? 'pointer' : 'not-allowed',
+                    cursor: isExtracting || !selectedPdf ? 'not-allowed' : 'pointer',
                     fontWeight: activeTab === 'text' ? 'bold' : 'normal',
                   }}
                 >
-                  📝 Text {extractedText ? '✓' : ''}
+                  {isExtracting ? '⏳ Extracting...' : '📝 Text'} {extractedText ? '✓' : ''}
                 </button>
                 <button
                   onClick={() => setActiveTab('summary')}
@@ -511,14 +539,6 @@ export default function Home() {
               {/* Action Buttons */}
               <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                 <button
-                  onClick={extractText}
-                  disabled={isExtracting || !selectedPdf}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold py-1 px-3 rounded text-sm"
-                  style={{ cursor: isExtracting || !selectedPdf ? 'not-allowed' : 'pointer' }}
-                >
-                  {isExtracting ? '⏳ Extracting...' : '📤 Extract Text'}
-                </button>
-                <button
                   onClick={generateSummary}
                   disabled={isSummarizing || !extractedText}
                   className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold py-1 px-3 rounded text-sm"
@@ -529,7 +549,7 @@ export default function Home() {
               </div>
 
               {/* Tab Content */}
-              <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: 'white', padding: '1rem', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: 'green', padding: '1rem', display: 'flex', flexDirection: 'column' }}>
                 {/* PDF Viewer Tab */}
                 {activeTab === 'pdf' && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -545,31 +565,42 @@ export default function Home() {
                         title="PDF Viewer"
                       />
                     ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'orange', fontSize: '0.875rem' }}>
                         No PDF selected
                       </div>
                     )}
                   </div>
                 )}
-
-                {/* Extracted Text Tab */}
+                 {/* Extracted Text Tab */}
                 {activeTab === 'text' && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
                     {extractError && (
                       <div style={{ padding: '0.75rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.875rem' }}>
                         ❌ {extractError}
                       </div>
                     )}
-                    {extractedText ? (
-                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: 'black' }}>
-                        {extractedText}
-                      </div>
-                    ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
-                        Click "Extract Text" to view extracted content
-                      </div>
-                    )}
+                    <iframe
+                      title="Extracted Text"
+                      style={{
+                        flex: 1,
+                        minHeight: 0,
+                        height: '100%',
+                        width: '100%',
+                        border: '1px solid #eee',
+                        borderRadius: '4px',
+                        background: 'white',
+                        marginBottom: 0
+                      }}
+                      srcDoc={`<html><body style='margin:0;padding:1rem;font-family:sans-serif;white-space:pre-wrap;font-size:14px;background:white;color:black;'>${
+                        extractedText
+                          ? extractedText.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+                          : (selectedFile && selectedFile.type === 'application/pdf'
+                              ? (isExtracting ? 'Extracting text...' : 'No text extracted yet.')
+                              : (selectedFile ? 'No text extracted yet.' : 'No file selected.'))
+                      }</body></html>`}
+                    />
                   </div>
+                  
                 )}
 
                 {/* Summary Tab */}
