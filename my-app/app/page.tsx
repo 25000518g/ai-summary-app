@@ -386,7 +386,7 @@ export default function Home() {
                       <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>File Name</th>
                       <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Type</th>
                       <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Size (KB)</th>
-                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Location</th>
+                      {/* Removed Location column header */}
                       <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Action</th>
                     </tr>
                   </thead>
@@ -409,7 +409,7 @@ export default function Home() {
                         </td>
                         <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{file.name.includes('.pdf') ? 'PDF' : 'TXT'}</td>
                         <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{(file.size / 1024).toFixed(2)}</td>
-                        <td style={{ border: '1px solid #ddd', padding: '10px', color: '#0070f3', fontWeight: 500 }}>☁️ Supabase</td>
+                        {/* Removed Location cell for Supabase files */}
                         <td style={{ border: '1px solid #ddd', padding: '10px' }}>
                           <button
                             onClick={(e) => {
@@ -441,7 +441,7 @@ export default function Home() {
                         </td>
                         <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{file.type === 'text/plain' ? 'TXT' : 'PDF'}</td>
                         <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{(file.size / 1024).toFixed(2)}</td>
-                        <td style={{ border: '1px solid #ddd', padding: '10px', color: '#666', fontWeight: 500 }}>📤 Local</td>
+                        {/* Removed Location cell for Local files */}
                         <td style={{ border: '1px solid #ddd', padding: '10px' }}>
                           <button
                             onClick={(e) => {
