@@ -46,11 +46,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Generate a unique filename with timestamp
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(7);
-    const fileExtension = file.name.split('.').pop();
-    const fileName = `${timestamp}-${random}.${fileExtension}`;
+    // Use original filename
+    const fileName = file.name;
 
     // Upload file to Supabase Storage
     const bucketName = 'documents';

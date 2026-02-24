@@ -4,12 +4,22 @@ import { useState, useEffect } from "react";
 
 type ViewerTab = 'pdf' | 'text' | 'summary';
 
+interface SupabaseFile {
+  name: string;
+  size: number;
+  created_at: string;
+  publicUrl: string;
+}
+
 let pdfjs: any;
 
 export default function Home() {
-  const [status, setStatus] = useState("No file uploaded");
+  const [status, setStatus] = useState("Loading files...");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [supabaseFiles, setSupabaseFiles] = useState<SupabaseFile[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [selectedPdf, setSelectedPdf] = useState<File | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -33,6 +43,30 @@ export default function Home() {
         console.error('Failed to initialize PDF.js for extraction:', error);
       }
     })();
+  }, []);
+
+  // Fetch files from Supabase on mount
+  const loadSupabaseFiles = async () => {
+    try {
+      const response = await fetch('/api/list-files');
+      const data = await response.json();
+      
+      if (data.files) {
+        setSupabaseFiles(data.files);
+        setStatus(`📁 ${data.files.length + uploadedFiles.length} total files`);
+      } else {
+        setStatus('No files found in Supabase');
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch files:', error);
+      setStatus('Failed to load files from Supabase');
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSupabaseFiles();
   }, []);
 
   // Cleanup Blob URL when component unmounts or PDF changes
@@ -190,12 +224,103 @@ export default function Home() {
       setPageNumber(1);
       setNumPages(null);
     }
-    setStatus(updatedFiles.length === 0 ? "No files uploaded" : `${updatedFiles.length} file(s) uploaded`);
+    setStatus(updatedFiles.length === 0 && supabaseFiles.length === 0 ? "No files" : `${updatedFiles.length + supabaseFiles.length} total files`);
+  }
+
+  async function deleteSupabaseFile(fileName: string) {
+    if (!confirm(`Are you sure you want to delete "${fileName}" from Supabase?`)) {
+      return;
+    }
+
+    try {
+      setStatus(`Deleting ${fileName}...`);
+      const response = await fetch('/api/delete-file', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fileName }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setStatus(`✅ Deleted: ${fileName}`);
+        // Remove from UI
+        setSupabaseFiles(supabaseFiles.filter((f) => f.name !== fileName));
+        // Clear viewer if deleted file is selected
+        if (selectedFileName === fileName) {
+          setSelectedPdf(null);
+          setSelectedFileName(null);
+          setPdfUrl(null);
+          setExtractedText(null);
+          setSummary(null);
+          setPageNumber(1);
+          setNumPages(null);
+        }
+        await loadSupabaseFiles();
+      } else {
+        setStatus(`❌ Failed to delete: ${data.error}`);
+      }
+    } catch (error: any) {
+      setStatus(`❌ Delete error: ${error.message}`);
+    }
+  }
+
+  async function selectSupabaseFile(file: SupabaseFile) {
+    try {
+      setStatus(`Loading: ${file.name}...`);
+      
+      // Fetch the file from Supabase
+      const response = await fetch(file.publicUrl);
+      if (!response.ok) throw new Error('Failed to fetch file');
+      
+      const blob = await response.blob();
+      const fileName = file.name;
+      
+      // Determine MIME type based on file extension
+      let mimeType = 'application/octet-stream';
+      if (fileName.endsWith('.pdf')) {
+        mimeType = 'application/pdf';
+      } else if (fileName.endsWith('.txt')) {
+        mimeType = 'text/plain';
+      }
+      
+      // Create a File object from the blob
+      const fileObj = new File([blob], fileName, { type: mimeType });
+      
+      setSelectedPdf(fileObj);
+      setSelectedFileName(file.name);
+      
+      if (mimeType === 'application/pdf') {
+        // Create object URL for PDF preview
+        const url = URL.createObjectURL(fileObj);
+        setPdfUrl(url);
+        setActiveTab('pdf');
+      } else {
+        setPdfUrl(null);
+        // For TXT files, extract text immediately
+        const text = await fileObj.text();
+        setExtractedText(text);
+        setActiveTab('text');
+      }
+      
+      setPageNumber(1);
+      setNumPages(null);
+      setStatus(`Viewing: ${fileName}`);
+      setSummary(null);
+      setExtractError(null);
+      setSummaryError(null);
+    } catch (error: any) {
+      setStatus(`Error loading file: ${error.message}`);
+      setExtractError(error.message);
+    }
   }
 
   function selectPdfFile(file: File) {
     if (file.type === 'application/pdf') {
       setSelectedPdf(file);
+      setSelectedFileName(file.name);
       // Create a Blob URL from the File object
       const url = URL.createObjectURL(file);
       setPdfUrl(url);
@@ -214,7 +339,7 @@ export default function Home() {
   }
 
   return (
-    <div style={{ fontFamily: "system-ui", padding: 24, minHeight: '100vh' }}>
+    <div style={{ fontFamily: "system-ui", padding: 24, minHeight: '100vh', backgroundColor: 'white', color: 'black' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '1rem', color: '#1d324b' }}>AI Summary App</h1>
       <h1 style={{ fontSize: '2rem', marginBottom: '1rem', color: '#1d324b' }}>UploadDocument</h1>
       
@@ -223,7 +348,7 @@ export default function Home() {
         <div style={{ flex: 1, overflowY: 'auto', paddingRight: '1rem' }}>
           <div style={{ marginBottom: '2rem' }}>
             <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500, color: 'black' }}>
                 Upload Files (TXT or PDF):
               </label>
               <input
@@ -235,53 +360,102 @@ export default function Home() {
               />
             </div>
 
-            {uploadedFiles.length > 0 && (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#f2f2f2' }}>File Name</th>
-                    <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#f2f2f2' }}>File Type</th>
-                    <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#f2f2f2' }}>Size (KB)</th>
-                    <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#f2f2f2' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {uploadedFiles.map((file, index) => (
-                    <tr key={index}>
-                      <td 
-                        style={{ 
-                          border: '1px solid #ddd', 
-                          padding: '10px',
+            {/* Combined Files Section */}
+            {isLoadingFiles ? (
+              <div style={{ padding: '1rem', textAlign: 'center', color: 'black' }}>⏳ Loading files from Supabase...</div>
+            ) : supabaseFiles.length > 0 || uploadedFiles.length > 0 ? (
+              <div style={{ marginBottom: '2rem' }}>
+                <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem', color: 'black', textTransform: 'uppercase' }}>
+                  📁 All Files ({supabaseFiles.length + uploadedFiles.length})
+                </h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>File Name</th>
+                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Type</th>
+                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Size (KB)</th>
+                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Location</th>
+                      <th style={{ border: '1px solid #ddd', padding: '10px', backgroundColor: '#e3f2fd', color: 'black' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Supabase Files */}
+                    {supabaseFiles.map((file) => (
+                      <tr
+                        key={`supabase-${file.name}`}
+                        onClick={() => selectSupabaseFile(file)}
+                        style={{
+                          cursor: 'pointer',
+                          backgroundColor: selectedFileName === file.name ? '#bbdefb' : 'white',
+                          fontWeight: selectedFileName === file.name ? 'bold' : 'normal',
+                          borderLeft: selectedFileName === file.name ? '3px solid #0070f3' : '3px solid transparent',
+                          color: 'black',
+                        }}
+                      >
+                        <td style={{ border: '1px solid #ddd', padding: '10px', wordBreak: 'break-word', color: 'black' }}>
+                          {file.name.includes('.pdf') ? '📄' : '📝'} {file.name}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{file.name.includes('.pdf') ? 'PDF' : 'TXT'}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{(file.size / 1024).toFixed(2)}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: '#0070f3', fontWeight: 500 }}>☁️ Supabase</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteSupabaseFile(file.name);
+                            }}
+                            className="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded text-sm"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {/* Local Files */}
+                    {uploadedFiles.map((file, index) => (
+                      <tr
+                        key={`local-${index}`}
+                        onClick={() => selectPdfFile(file)}
+                        style={{
                           cursor: file.type === 'application/pdf' ? 'pointer' : 'default',
                           backgroundColor: selectedPdf === file ? '#e3f2fd' : 'white',
-                          fontWeight: selectedPdf === file ? 'bold' : 'normal'
+                          fontWeight: selectedPdf === file ? 'bold' : 'normal',
+                          borderLeft: selectedPdf === file ? '3px solid #0070f3' : '3px solid transparent',
+                          color: 'black',
                         }}
-                        onClick={() => selectPdfFile(file)}
                       >
-                        {file.name}
-                      </td>
-                      <td style={{ border: '1px solid #ddd', padding: '10px' }}>{file.type === 'text/plain' ? 'TXT' : 'PDF'}</td>
-                      <td style={{ border: '1px solid #ddd', padding: '10px' }}>{(file.size / 1024).toFixed(2)}</td>
-                      <td style={{ border: '1px solid #ddd', padding: '10px' }}>
-                        <button
-                          onClick={() => removeFile(index)}
-                          className="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded text-sm"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', wordBreak: 'break-word', color: 'black' }}>
+                          {file.type === 'application/pdf' ? '📄' : '📝'} {file.name}
+                        </td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{file.type === 'text/plain' ? 'TXT' : 'PDF'}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: 'black' }}>{(file.size / 1024).toFixed(2)}</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px', color: '#666', fontWeight: 500 }}>📤 Local</td>
+                        <td style={{ border: '1px solid #ddd', padding: '10px' }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFile(index);
+                            }}
+                            className="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded text-sm"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ padding: '1rem', textAlign: 'center', color: 'black' }}>No files uploaded yet</div>
             )}
           </div>
           
-          <p style={{ marginTop: 12, fontWeight: 500 }}>{status}</p>
+          <p style={{ marginTop: 12, fontWeight: 500, color: 'black' }}>{status}</p>
         </div>
 
         {/* Right Panel - Document Viewer with Tabs */}
-        <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', backgroundColor: '#f9f9f9', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: '8px', padding: '1rem', backgroundColor: 'white', display: 'flex', flexDirection: 'column', color: 'black' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: '#1d324b' }}>Document Viewer</h2>
           
           {selectedPdf ? (
@@ -294,7 +468,7 @@ export default function Home() {
                     padding: '0.5rem 1rem',
                     border: 'none',
                     backgroundColor: activeTab === 'pdf' ? '#0070f3' : '#e0e0e0',
-                    color: activeTab === 'pdf' ? 'white' : '#333',
+                    color: activeTab === 'pdf' ? 'white' : 'black',
                     borderRadius: '4px',
                     cursor: 'pointer',
                     fontWeight: activeTab === 'pdf' ? 'bold' : 'normal',
@@ -309,7 +483,7 @@ export default function Home() {
                     padding: '0.5rem 1rem',
                     border: 'none',
                     backgroundColor: activeTab === 'text' ? '#0070f3' : (extractedText ? '#e0e0e0' : '#f0f0f0'),
-                    color: activeTab === 'text' ? 'white' : (extractedText ? '#333' : '#999'),
+                    color: activeTab === 'text' ? 'white' : (extractedText ? 'black' : '#999'),
                     borderRadius: '4px',
                     cursor: extractedText ? 'pointer' : 'not-allowed',
                     fontWeight: activeTab === 'text' ? 'bold' : 'normal',
@@ -324,7 +498,7 @@ export default function Home() {
                     padding: '0.5rem 1rem',
                     border: 'none',
                     backgroundColor: activeTab === 'summary' ? '#0070f3' : (summary ? '#e0e0e0' : '#f0f0f0'),
-                    color: activeTab === 'summary' ? 'white' : (summary ? '#333' : '#999'),
+                    color: activeTab === 'summary' ? 'white' : (summary ? 'black' : '#999'),
                     borderRadius: '4px',
                     cursor: summary ? 'pointer' : 'not-allowed',
                     fontWeight: activeTab === 'summary' ? 'bold' : 'normal',
@@ -371,7 +545,7 @@ export default function Home() {
                         title="PDF Viewer"
                       />
                     ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.875rem' }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
                         No PDF selected
                       </div>
                     )}
@@ -387,11 +561,11 @@ export default function Home() {
                       </div>
                     )}
                     {extractedText ? (
-                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: '#333' }}>
+                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: 'black' }}>
                         {extractedText}
                       </div>
                     ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.875rem' }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
                         Click "Extract Text" to view extracted content
                       </div>
                     )}
@@ -407,11 +581,11 @@ export default function Home() {
                       </div>
                     )}
                     {summary ? (
-                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: '#333' }}>
+                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: 'black' }}>
                         {summary}
                       </div>
                     ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.875rem' }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
                         Click "Generate Summary" to view AI-generated summary
                       </div>
                     )}
@@ -420,7 +594,7 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.875rem' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
               Click on a PDF file to view it here
             </div>
           )}
