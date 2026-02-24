@@ -146,7 +146,31 @@ export default function Home() {
       // Validate file type
       if (fileType === 'text/plain' || fileType === 'application/pdf') {
         newFiles.push(file);
-        setStatus(`Uploaded: ${fileName}`);
+        
+        // Upload to Supabase
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            setStatus(`✅ Uploaded: ${fileName} to Supabase`);
+          } else if (response.status === 511) {
+            // Supabase not configured - file is stored locally only
+            setStatus(`⚠️ Uploaded locally: ${fileName} (Supabase not configured)`);
+            console.log('Supabase message:', data.message);
+          } else {
+            setStatus(`❌ Failed to upload ${fileName}: ${data.error}`);
+          }
+        } catch (error: any) {
+          setStatus(`❌ Upload error: ${error.message}`);
+        }
       } else {
         setStatus(`Invalid file type: ${fileName}. Please upload .txt or .pdf files only.`);
       }
