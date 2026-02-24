@@ -37,21 +37,11 @@ export default function Home() {
     (async () => {
       try {
         const pdfjsLib = await import('pdfjs-dist');
-        // pdfjs-dist exports the pdf object directly, not as default
         pdfjs = pdfjsLib.default || pdfjsLib;
-        
-        // Handle both module formats
-        if (!pdfjs || !pdfjs.getDocument) {
-          // Try to access the pdf property if it exists
-          pdfjs = pdfjsLib.pdf || pdfjsLib;
-        }
-        
-        if (!pdfjs || !pdfjs.GlobalWorkerOptions) {
+        if (!pdfjs || !pdfjs.getDocument || !pdfjs.GlobalWorkerOptions) {
           throw new Error('PDF.js module structure not recognized');
         }
-        
         // Configure worker for text extraction - use local worker from public directory
-        // This avoids CDN issues and provides more reliable PDF processing
         pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
         setIsPdfReady(true);
       } catch (error) {
@@ -604,9 +594,9 @@ export default function Home() {
                       srcDoc={`<html><body style='margin:0;padding:1rem;font-family:sans-serif;white-space:pre-wrap;font-size:14px;background:white;color:black;'>${
                         extractedText
                           ? extractedText.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-                          : (selectedFile && selectedFile.type === 'application/pdf'
+                          : (selectedPdf && selectedPdf.type === 'application/pdf'
                               ? (isExtracting ? 'Extracting text...' : 'No text extracted yet.')
-                              : (selectedFile ? 'No text extracted yet.' : 'No file selected.'))
+                              : (selectedPdf ? 'No text extracted yet.' : 'No file selected.'))
                       }</body></html>`}
                     />
                   </div>
