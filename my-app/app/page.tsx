@@ -484,27 +484,35 @@ export default function Home() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               {/* Tabs */}
               <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid #ddd', paddingBottom: '0.5rem' }}>
-                <button
-                  onClick={() => setActiveTab('pdf')}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    border: 'none',
-                    backgroundColor: activeTab === 'pdf' ? '#0070f3' : '#e0e0e0',
-                    color: activeTab === 'pdf' ? 'white' : 'black',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontWeight: activeTab === 'pdf' ? 'bold' : 'normal',
-                  }}
-                >
-                  📄 PDF
-                </button>
+                {selectedPdf && selectedPdf.type === 'application/pdf' && (
+                  <button
+                    onClick={() => setActiveTab('pdf')}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      border: 'none',
+                      backgroundColor: activeTab === 'pdf' ? '#0070f3' : '#e0e0e0',
+                      color: activeTab === 'pdf' ? 'white' : 'black',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontWeight: activeTab === 'pdf' ? 'bold' : 'normal',
+                    }}
+                  >
+                    📄 PDF
+                  </button>
+                )}
                 <button
                   onClick={async () => {
                     if (!selectedPdf) {
                       setExtractError("Please select a file first");
                       return;
                     }
-                    await extractText();
+                    if (selectedPdf.type === 'application/pdf') {
+                      await extractText();
+                    } else if (selectedPdf.type === 'text/plain') {
+                      const text = await selectedPdf.text();
+                      setExtractedText(text);
+                      setActiveTab('text');
+                    }
                   }}
                   disabled={isExtracting || !selectedPdf}
                   style={{
@@ -517,7 +525,9 @@ export default function Home() {
                     fontWeight: activeTab === 'text' ? 'bold' : 'normal',
                   }}
                 >
-                  {isExtracting ? '⏳ Extracting...' : '📝 Text'} {extractedText ? '✓' : ''}
+                  {isExtracting && selectedPdf && selectedPdf.type === 'application/pdf'
+                    ? '⏳ Extracting...'
+                    : '📝 Text'} {extractedText ? '✓' : ''}
                 </button>
                 <button
                   onClick={() => setActiveTab('summary')}
