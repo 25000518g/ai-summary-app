@@ -6,7 +6,7 @@ This is a Next.js 16 app using the App Router for an AI-powered document summari
 - **Backend**: API routes in `app/api/` for file upload, text extraction, and AI summarization
 - **Storage**: Supabase Object Storage (S3-compatible) for storing uploaded PDF/TXT files
 - **Database**: Supabase PostgreSQL (planned) - for storing documents metadata and summaries
-- **AI Integration**: OpenAI/Anthropic for document text extraction and summarization
+- **AI **: GitHub Models API (OpenAI-compatible) - gpt-4o-mini for summarization
 - **PDF Viewer**: Native HTML5 iframe for PDF preview, pdfjs-dist for client-side text extraction
 **Deployment**: Vercel
 
