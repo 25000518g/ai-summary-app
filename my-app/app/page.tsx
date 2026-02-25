@@ -1,4 +1,58 @@
+// SummaryEditor component for editing and saving summary
 'use client'
+function SummaryEditor({ summary, setSummary }: { summary: string, setSummary: (s: string) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(summary);
+
+  useEffect(() => {
+    setEditValue(summary);
+  }, [summary]);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {isEditing ? (
+        <>
+          <textarea
+            value={editValue}
+            onChange={e => setEditValue(e.target.value)}
+            style={{ flex: 1, minHeight: 120, fontSize: '0.875rem', color: 'black', border: '1px solid #ddd', borderRadius: 4, padding: 8, marginBottom: 12 }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => {
+                setSummary(editValue);
+                setIsEditing(false);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-1 px-3 rounded text-sm"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setIsEditing(false)}
+              className="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded text-sm"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: 'black', marginBottom: 12 }}>
+            {summary}
+          </div>
+          <button
+            onClick={() => setIsEditing(true)}
+            className="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-1 px-3 rounded text-sm"
+            style={{ alignSelf: 'flex-start' }}
+          >
+            Edit
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 
 import { useState, useEffect } from "react";
 
@@ -320,9 +374,28 @@ export default function Home() {
       setPageNumber(1);
       setNumPages(null);
       setStatus(`Viewing: ${fileName}`);
-      setSummary(null);
       setExtractError(null);
       setSummaryError(null);
+
+      // Try to fetch existing summary for this file from Supabase
+      try {
+        const sresp = await fetch(`/api/summaries?fileName=${encodeURIComponent(file.name)}`);
+        if (sresp.ok) {
+          const sdata = await sresp.json();
+          const row = sdata.summary;
+          if (row && row.summary) {
+            setSummary(row.summary);
+            setStatus((prev) => `${prev} — loaded saved summary`);
+          } else {
+            setSummary(null);
+          }
+        } else {
+          setSummary(null);
+        }
+      } catch (err) {
+        // ignore fetch errors, keep summary null
+        setSummary(null);
+      }
     } catch (error: any) {
       setStatus(`Error loading file: ${error.message}`);
       setExtractError(error.message);
@@ -345,6 +418,22 @@ export default function Home() {
       setExtractError(null);
       setSummaryError(null);
       setActiveTab('pdf');
+      // Try to load an existing summary for this filename from Supabase
+      (async () => {
+        try {
+          const sresp = await fetch(`/api/summaries?fileName=${encodeURIComponent(file.name)}`);
+          if (sresp.ok) {
+            const sdata = await sresp.json();
+            const row = sdata.summary;
+            if (row && row.summary) {
+              setSummary(row.summary);
+              setStatus((prev) => `${prev} — loaded saved summary`);
+            }
+          }
+        } catch (err) {
+          // ignore
+        }
+      })();
     } else {
       setStatus("Please select a PDF file to view");
     }
@@ -520,108 +609,128 @@ export default function Home() {
                     : '📝 Text'} {extractedText ? '✓' : ''}
                 </button>
                 <button
-                  onClick={() => setActiveTab('summary')}
-                  disabled={!summary}
+                  onClick={async () => {
+                    setActiveTab('summary');
+                    // If we don't already have a summary and extractedText is available, generate one
+                    if (!summary && extractedText && !isSummarizing) {
+                      await generateSummary();
+                    }
+                  }}
+                  // Enable the button when there is extracted text OR an existing summary
+                  disabled={isSummarizing || (!extractedText && !summary)}
                   style={{
                     padding: '0.5rem 1rem',
                     border: 'none',
-                    backgroundColor: activeTab === 'summary' ? '#0070f3' : (summary ? '#e0e0e0' : '#f0f0f0'),
-                    color: activeTab === 'summary' ? 'white' : (summary ? 'black' : '#999'),
+                    backgroundColor: activeTab === 'summary' ? '#0070f3' : '#e0e0e0',
+                    color: activeTab === 'summary' ? 'white' : 'black',
                     borderRadius: '4px',
-                    cursor: summary ? 'pointer' : 'not-allowed',
+                    cursor: isSummarizing || !extractedText ? 'not-allowed' : 'pointer',
                     fontWeight: activeTab === 'summary' ? 'bold' : 'normal',
                   }}
                 >
-                  ✨ Summary {summary ? '✓' : ''}
+                  {isSummarizing ? '⏳ Generating...' : '✨ Summary'}
                 </button>
               </div>
 
               {/* Action Buttons */}
-              <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-                <button
-                  onClick={generateSummary}
-                  disabled={isSummarizing || !extractedText}
-                  className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold py-1 px-3 rounded text-sm"
-                  style={{ cursor: isSummarizing || !extractedText ? 'not-allowed' : 'pointer' }}
+              {/* Generate Summary button moved to Summary tab only */}
+
+              {/* Tab Content: render three separate panels and only show the active one */}
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', border: '1px solid #ddd', borderRadius: '4px', padding: '1rem', position: 'relative' }}>
+                {/* PDF Viewer Panel */}
+                <div
+                  style={{
+                    display: activeTab === 'pdf' ? 'flex' : 'none',
+                    position: 'absolute',
+                    inset: 0,
+                    padding: '1rem',
+                    boxSizing: 'border-box',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                  }}
                 >
-                  {isSummarizing ? '⏳ Summarizing...' : '✨ Generate Summary'}
-                </button>
-              </div>
-
-              {/* Tab Content */}
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: 'green', padding: '1rem', display: 'flex', flexDirection: 'column' }}>
-                {/* PDF Viewer Tab */}
-                {activeTab === 'pdf' && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    {pdfUrl ? (
-                      <iframe
-                        src={pdfUrl}
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          border: 'none',
-                          borderRadius: '4px',
-                        }}
-                        title="PDF Viewer"
-                      />
-                    ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'orange', fontSize: '0.875rem' }}>
-                        No PDF selected
-                      </div>
-                    )}
-                  </div>
-                )}
-                 {/* Extracted Text Tab */}
-                {activeTab === 'text' && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
-                    {extractError && (
-                      <div style={{ padding: '0.75rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.875rem' }}>
-                        ❌ {extractError}
-                      </div>
-                    )}
+                  {pdfUrl ? (
                     <iframe
-                      title="Extracted Text"
+                      src={pdfUrl}
                       style={{
-                        flex: 1,
-                        minHeight: 0,
-                        height: '100%',
                         width: '100%',
-                        border: '1px solid #eee',
+                        height: '100%',
+                        border: 'none',
                         borderRadius: '4px',
-                        background: 'white',
-                        marginBottom: 0
                       }}
-                      srcDoc={`<html><body style='margin:0;padding:1rem;font-family:sans-serif;white-space:pre-wrap;font-size:14px;background:white;color:black;'>${
-                        extractedText
-                          ? extractedText.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
-                          : (selectedPdf && selectedPdf.type === 'application/pdf'
-                              ? (isExtracting ? 'Extracting text...' : 'No text extracted yet.')
-                              : (selectedPdf ? 'No text extracted yet.' : 'No file selected.'))
-                      }</body></html>`}
+                      title="PDF Viewer"
                     />
-                  </div>
-                  
-                )}
+                  ) : (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'orange', fontSize: '0.875rem' }}>
+                      No PDF selected
+                    </div>
+                  )}
+                </div>
 
-                {/* Summary Tab */}
-                {activeTab === 'summary' && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    {summaryError && (
-                      <div style={{ padding: '0.75rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.875rem' }}>
-                        ❌ {summaryError}
-                      </div>
-                    )}
-                    {summary ? (
-                      <div style={{ flex: 1, whiteSpace: 'pre-wrap', wordWrap: 'break-word', lineHeight: '1.6', fontSize: '0.875rem', color: 'black' }}>
-                        {summary}
-                      </div>
-                    ) : (
-                      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
-                        Click "Generate Summary" to view AI-generated summary
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Extracted Text Panel */}
+                <div
+                  style={{
+                    display: activeTab === 'text' ? 'flex' : 'none',
+                    position: 'absolute',
+                    inset: 0,
+                    padding: '1rem',
+                    boxSizing: 'border-box',
+                    flexDirection: 'column',
+                  }}
+                >
+                  {extractError && (
+                    <div style={{ padding: '0.75rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                      ❌ {extractError}
+                    </div>
+                  )}
+                  <iframe
+                    title="Extracted Text"
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      height: '100%',
+                      width: '100%',
+                      border: '1px solid #eee',
+                      borderRadius: '4px',
+                      background: 'white',
+                      marginBottom: 0,
+                    }}
+                    srcDoc={`<html><body style='margin:0;padding:1rem;font-family:sans-serif;white-space:pre-wrap;font-size:14px;background:white;color:black;'>${
+                      extractedText
+                        ? extractedText.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+                        : (selectedPdf && selectedPdf.type === 'application/pdf'
+                            ? (isExtracting ? 'Extracting text...' : 'No text extracted yet.')
+                            : (selectedPdf ? 'No text extracted yet.' : 'No file selected.'))
+                    }</body></html>`}
+                  />
+                </div>
+
+                {/* Summary Panel */}
+                <div
+                  style={{
+                    display: activeTab === 'summary' ? 'flex' : 'none',
+                    position: 'absolute',
+                    inset: 0,
+                    padding: '1rem',
+                    boxSizing: 'border-box',
+                    flexDirection: 'column',
+                  }}
+                >
+                  {summaryError && (
+                    <div style={{ padding: '0.75rem', backgroundColor: '#ffebee', color: '#c62828', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                      ❌ {summaryError}
+                    </div>
+                  )}
+                  {summary ? (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                      <SummaryEditor summary={summary} setSummary={setSummary} />
+                    </div>
+                  ) : (
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'black', fontSize: '0.875rem' }}>
+                      Click "Generate Summary" to view AI-generated summary
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
